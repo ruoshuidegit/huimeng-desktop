@@ -1,6 +1,6 @@
 {
   "name": "huimeng-agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "MCP server bridging local AI agents to the Huimeng cloud API",
   "type": "module",
   "bin": {
