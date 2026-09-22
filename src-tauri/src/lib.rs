@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use tauri::webview::DownloadEvent;
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 
-const CLOUD_URL: &str = "https://tapxflow.com";
+const CLOUD_URL: &str = "https://tapxflow.com/?client=desktop";
 
 fn archive_dir() -> Option<PathBuf> {
     let home = std::env::var("HOME").ok()?;
