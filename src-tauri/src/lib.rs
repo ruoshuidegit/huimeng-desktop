@@ -1,7 +1,10 @@
 use std::path::PathBuf;
+use std::sync::mpsc::channel;
 
 use tauri::webview::DownloadEvent;
 use tauri::{WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+use tauri_plugin_updater::UpdaterExt;
 
 const CLOUD_URL: &str = "https://tapxflow.com/?client=desktop";
 
@@ -45,6 +48,8 @@ fn archive_destination(url: &str, base: &PathBuf) -> PathBuf {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let builder = WebviewWindowBuilder::new(
                 app,
@@ -75,7 +80,7 @@ pub fn run() {
                             }
                             true
                         }
-                        _ => true
+                        _ => true,
                     })
                     .build()?;
             }
@@ -85,8 +90,71 @@ pub fn run() {
                 let _ = builder;
             }
 
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                check_for_updates(handle).await;
+            });
+
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+async fn check_for_updates(app: tauri::AppHandle) {
+    let Ok(updater) = app.updater() else {
+        return;
+    };
+
+    let update = match updater.check().await {
+        Ok(Some(update)) => update,
+        Ok(None) => return,
+        Err(err) => {
+            eprintln!("[updater] check failed: {err}");
+            return;
+        }
+    };
+
+    let current = update.current_version.clone();
+    let latest = update.version.clone();
+    let body = update.body.clone().unwrap_or_default();
+
+    let (tx, rx) = channel();
+    app.dialog()
+        .message(format!(
+            "发现新版本 v{latest}（当前 v{current}）。  {body}  是否立即下载并安装？"
+        ))
+        .title("发现新版本")
+        .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "立即更新".to_string(),
+            "稍后".to_string(),
+        ))
+        .show(move |answer| {
+            let _ = tx.send(answer);
+        });
+
+    let Ok(confirmed) = rx.recv() else {
+        return;
+    };
+    if !confirmed {
+        return;
+    }
+
+    match update
+        .download_and_install(|_chunk_length, _content_length| {}, || {})
+        .await
+    {
+        Ok(()) => {
+            app.restart();
+        }
+        Err(err) => {
+            app.dialog()
+                .message(format!("更新失败：{err}"))
+                .title("更新失败")
+                .kind(MessageDialogKind::Error)
+                .buttons(MessageDialogButtons::Ok)
+                .show(|_| {});
+        }
+    }
 }
