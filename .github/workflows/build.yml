@@ -16,10 +16,16 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
+            arch: aarch64
+            rust-target: aarch64-apple-darwin
             args: --target aarch64-apple-darwin
           - platform: macos-latest
+            arch: x86_64
+            rust-target: x86_64-apple-darwin
             args: --target x86_64-apple-darwin
           - platform: windows-latest
+            arch: x64
+            rust-target: ''
             args: ''
 
     runs-on: ${{ matrix.platform }}
@@ -35,7 +41,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && matrix.args == '--target x86_64-apple-darwin' && 'x86_64-apple-darwin' || 'aarch64-apple-darwin' }}
+          targets: ${{ matrix.rust-target }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -52,9 +58,88 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Huimeng Desktop ${{ github.ref_name }}'
-          releaseBody: 'See the assets to download this version and install.'
-          releaseDraft: true
-          prerelease: false
+          includeRelease: false
+          includeUpdaterJson: false
+          includeDebug: false
           args: ${{ matrix.args }}
+
+      - name: Stage artifacts
+        shell: bash
+        env:
+          REF: ${{ github.ref_name }}
+          PLATFORM: ${{ matrix.platform }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          V=${REF#v}
+          mkdir -p upload
+          if [ $PLATFORM = windows-latest ]; then
+            cp src-tauri/target/release/bundle/nsis/*-setup.exe upload/huimeng-desktop_${V}_x64-setup.exe
+            cp src-tauri/target/release/bundle/nsis/*-setup.exe.sig upload/huimeng-desktop_${V}_x64-setup.exe.sig
+            cp src-tauri/target/release/bundle/msi/*.msi upload/huimeng-desktop_${V}_x64_en-US.msi
+          else
+            cp src-tauri/target/*/release/bundle/macos/*.app.tar.gz upload/huimeng-desktop_${V}_${ARCH}.app.tar.gz
+            cp src-tauri/target/*/release/bundle/macos/*.app.tar.gz.sig upload/huimeng-desktop_${V}_${ARCH}.app.tar.gz.sig
+            cp src-tauri/target/*/release/bundle/dmg/*.dmg upload/huimeng-desktop_${V}_${ARCH}.dmg
+          fi
+          ls -la upload
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: updater-${{ matrix.platform }}-${{ matrix.arch }}
+          path: upload/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: updater-*
+          path: dist
+          merge-multiple: true
+
+      - name: Build updater manifest
+        run: |
+          python3 - <<'PY'
+          import json, os, datetime
+
+          V = os.environ['GITHUB_REF_NAME'].lstrip('v')
+          base = 'https://github.com/%s/releases/download/%s' % (os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_REF_NAME'])
+          entries = {
+              'darwin-aarch64': 'huimeng-desktop_%s_aarch64.app.tar.gz' % V,
+              'darwin-x86_64': 'huimeng-desktop_%s_x86_64.app.tar.gz' % V,
+              'windows-x86_64': 'huimeng-desktop_%s_x64-setup.exe' % V,
+          }
+          platforms = {}
+          for key, fname in entries.items():
+              sig_path = os.path.join('dist', fname + '.sig')
+              if not os.path.exists(sig_path):
+                  raise SystemExit('missing updater signature: ' + sig_path)
+              with open(sig_path, 'r', encoding='utf-8') as fh:
+                  signature = fh.read().strip()
+              platforms[key] = {'signature': signature, 'url': base + '/' + fname}
+          manifest = {
+              'version': V,
+              'notes': 'See the assets to download this version and install.',
+              'pub_date': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z'),
+              'platforms': platforms,
+          }
+          with open('dist/latest.json', 'w', encoding='utf-8') as fh:
+              json.dump(manifest, fh, indent=2)
+          print(json.dumps(manifest, indent=2))
+          PY
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Huimeng Desktop ${{ github.ref_name }}
+          body: See the assets to download this version and install.
+          draft: true
+          prerelease: false
+          files: dist/*
