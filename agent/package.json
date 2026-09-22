@@ -1,0 +1,16 @@
+{
+  "name": "huimeng-agent",
+  "version": "0.1.0",
+  "description": "MCP server bridging local AI agents to the Huimeng cloud API",
+  "type": "module",
+  "bin": {
+    "huimeng-agent": "./index.mjs"
+  },
+  "files": [
+    "index.mjs"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}
