@@ -10,14 +10,8 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [
-      {
-        "title": "慧梦桌面端",
-        "url": "https://tapxflow.com",
-        "width": 1440,
-        "height": 900
-      }
-    ],
+    "withGlobalTauri": true,
+    "windows": [],
     "security": {
       "csp": null
     }
