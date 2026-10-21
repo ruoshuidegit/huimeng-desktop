@@ -27,8 +27,9 @@ Function HuimengWriteInstallLog
   ClearErrors
   FileOpen $R7 "$HuimengInstallerLogDir\installer.log" a
   IfErrors log_failed
+  FileSeek $R7 0 END
   ${GetTime} "" "L" $R0 $R1 $R2 $R3 $R4 $R5 $R6
-  FileWrite $R7 "$R2-$R1-$R0T$R4:$R5:$R6 phase=$R9 version=$HuimengInstallerVersion reason=$HuimengInstallerFailure win_error=$HuimengInstallerProbeError attempts=$HuimengInstallerAttempts$\r$\n"
+  FileWrite $R7 "$R2-$R1-$R0T$R4:$R5:$R6 phase=$R9 target_version=$HuimengInstallerVersion reason=$HuimengInstallerFailure probe_win_error=$HuimengInstallerProbeError attempts=$HuimengInstallerAttempts$\r$\n"
   FileClose $R7
   Goto done
 
