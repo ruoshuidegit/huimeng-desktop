@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "proxy-settings",
+  "description": "仅供本地网络代理设置窗口使用",
+  "windows": ["proxy-settings"],
+  "permissions": ["core:default"]
+}

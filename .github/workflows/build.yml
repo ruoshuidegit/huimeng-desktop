@@ -5,30 +5,80 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: '构建版本，须与源码一致，例如 0.3.0'
+        required: true
+        type: string
+      publish:
+        description: '已完成实机验收，直接公开发布；默认仅创建草稿'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  PYTHONUTF8: '1'
+
+concurrency:
+  group: desktop-release-${{ inputs.version || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      commit: ${{ steps.version.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 校验版本和发布状态
+        id: version
+        env:
+          EXPECTED_VERSION: ${{ inputs.version || github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --limit 100 --json tagName,isDraft > "$RUNNER_TEMP/desktop-releases.json"
+          python scripts/desktop-release.py check-version \
+            --expected "$EXPECTED_VERSION" \
+            --releases-json "$RUNNER_TEMP/desktop-releases.json" \
+            --github-output "$GITHUB_OUTPUT"
+
   build:
+    needs: metadata
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
+          - runner: macos-latest
+            os: macos
             arch: aarch64
             rust-target: aarch64-apple-darwin
-            args: --target aarch64-apple-darwin
-          - platform: macos-latest
+          - runner: macos-latest
+            os: macos
             arch: x86_64
             rust-target: x86_64-apple-darwin
-            args: --target x86_64-apple-darwin
-          - platform: windows-latest
+          - runner: windows-latest
+            os: windows
             arch: x64
             rust-target: ''
-            args: ''
-
-    runs-on: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+      VERSION: ${{ needs.metadata.outputs.version }}
+      RUST_TARGET: ${{ matrix.rust-target }}
     steps:
       - uses: actions/checkout@v4
 
@@ -37,6 +87,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -47,94 +101,104 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
+          key: ${{ matrix.arch }}
 
-      - name: Install frontend dependencies
-        run: npm install
+      - name: 安装依赖并验证前端
+        run: |
+          npm ci
+          npm run build
 
-      - name: Build Tauri app
-        shell: bash
+      - name: Rust 测试
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+
+      - name: 构建正式安装包和更新签名
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npm run tauri build -- ${{ matrix.args }}
-
-      - name: Stage artifacts
-        shell: bash
-        env:
-          REF: ${{ github.ref_name }}
-          PLATFORM: ${{ matrix.platform }}
-          ARCH: ${{ matrix.arch }}
         run: |
-          set -euo pipefail
-          V=${REF#v}
-          mkdir -p upload
-          if [ $PLATFORM = windows-latest ]; then
-            cp src-tauri/target/release/bundle/nsis/*-setup.exe upload/huimeng-desktop_${V}_x64-setup.exe
-            cp src-tauri/target/release/bundle/nsis/*-setup.exe.sig upload/huimeng-desktop_${V}_x64-setup.exe.sig
-            cp src-tauri/target/release/bundle/msi/*.msi upload/huimeng-desktop_${V}_x64_en-US.msi
+          test -n "$TAURI_SIGNING_PRIVATE_KEY" || { echo '缺少更新签名密钥'; exit 1; }
+          if [ "$RUNNER_OS" = macOS ]; then
+            npm run tauri build -- --target "$RUST_TARGET" \
+              --config '{"bundle":{"macOS":{"signingIdentity":"-"}}}'
+            codesign --verify --deep --strict src-tauri/target/"$RUST_TARGET"/release/bundle/macos/*.app
           else
-            cp src-tauri/target/*/release/bundle/macos/*.app.tar.gz upload/huimeng-desktop_${V}_${ARCH}.app.tar.gz
-            cp src-tauri/target/*/release/bundle/macos/*.app.tar.gz.sig upload/huimeng-desktop_${V}_${ARCH}.app.tar.gz.sig
-            cp src-tauri/target/*/release/bundle/dmg/*.dmg upload/huimeng-desktop_${V}_${ARCH}.dmg
+            npm run tauri build -- --bundles nsis
           fi
-          ls -la upload
 
-      - name: Upload artifacts
+      - name: 收集正式发布资产
+        run: |
+          python scripts/desktop-release.py stage \
+            --version "$VERSION" --platform '${{ matrix.os }}' \
+            --arch '${{ matrix.arch }}' --target "$RUST_TARGET"
+
+      - name: 上传正式发布资产
         uses: actions/upload-artifact@v4
         with:
-          name: updater-${{ matrix.platform }}-${{ matrix.arch }}
+          name: updater-${{ matrix.os }}-${{ matrix.arch }}
           path: upload/
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 14
 
-  publish:
-    needs: [build]
+      # HTTP 回环地址仅存在于 debug 验收包，正式安装包仍使用 HTTPS 更新地址。
+      - name: 构建 Windows 更新验收基线
+        if: matrix.os == 'windows'
+        run: |
+          npm run tauri build -- --debug --bundles nsis \
+            --config '{"version":"0.2.99","plugins":{"updater":{"endpoints":["http://127.0.0.1:39789/latest.json"]}},"bundle":{"createUpdaterArtifacts":false}}'
+          python scripts/desktop-release.py stage-baseline --candidate-version "$VERSION"
+
+      - name: 上传 Windows 更新验收基线
+        if: matrix.os == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-update-baseline
+          path: baseline/
+          if-no-files-found: error
+          retention-days: 14
+
+  assemble:
+    needs: [metadata, build]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Download all artifacts
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 下载正式发布资产
         uses: actions/download-artifact@v4
         with:
           pattern: updater-*
           path: dist
           merge-multiple: true
 
-      - name: Build updater manifest
+      - name: 校验完整资产并生成更新清单
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
         run: |
-          python3 - <<'PY'
-          import json, os, datetime
+          python scripts/desktop-release.py manifest \
+            --version "$VERSION" --repository "$GITHUB_REPOSITORY" --directory dist
 
-          V = os.environ['GITHUB_REF_NAME'].lstrip('v')
-          base = 'https://github.com/%s/releases/download/%s' % (os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_REF_NAME'])
-          entries = {
-              'darwin-aarch64': 'huimeng-desktop_%s_aarch64.app.tar.gz' % V,
-              'darwin-x86_64': 'huimeng-desktop_%s_x86_64.app.tar.gz' % V,
-              'windows-x86_64': 'huimeng-desktop_%s_x64-setup.exe' % V,
-          }
-          platforms = {}
-          for key, fname in entries.items():
-              sig_path = os.path.join('dist', fname + '.sig')
-              if not os.path.exists(sig_path):
-                  raise SystemExit('missing updater signature: ' + sig_path)
-              with open(sig_path, 'r', encoding='utf-8') as fh:
-                  signature = fh.read().strip()
-              platforms[key] = {'signature': signature, 'url': base + '/' + fname}
-          manifest = {
-              'version': V,
-              'notes': 'See the assets to download this version and install.',
-              'pub_date': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z'),
-              'platforms': platforms,
-          }
-          with open('dist/latest.json', 'w', encoding='utf-8') as fh:
-              json.dump(manifest, fh, indent=2)
-          print(json.dumps(manifest, indent=2))
-          PY
+      - name: 上传完整发布候选
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-release-${{ needs.metadata.outputs.version }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
 
-      - name: Create release
+      - name: 创建发布草稿或显式公开发布
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: Huimeng Desktop ${{ github.ref_name }}
-          body: See the assets to download this version and install.
-          draft: false
+          tag_name: ${{ needs.metadata.outputs.tag }}
+          target_commitish: ${{ needs.metadata.outputs.commit }}
+          name: Huimeng Desktop ${{ needs.metadata.outputs.tag }}
+          generate_release_notes: true
+          draft: ${{ !(github.event_name == 'workflow_dispatch' && inputs.publish) }}
           prerelease: false
+          make_latest: ${{ github.event_name == 'workflow_dispatch' && inputs.publish && 'true' || 'false' }}
+          fail_on_unmatched_files: true
           files: dist/*
