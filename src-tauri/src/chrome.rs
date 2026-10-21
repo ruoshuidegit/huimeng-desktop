@@ -8,6 +8,10 @@ use tauri::{
 use crate::proxy::ProxySettings;
 use crate::{app_locale, archive_destination, archive_dir, is_local_settings_url, proxy_error};
 
+#[cfg_attr(not(windows), allow(dead_code))]
+#[path = "windows_menu_theme.rs"]
+mod windows_menu_theme;
+
 pub const CHROME_WEBVIEW: &str = "desktop-chrome";
 const CLOUD_WEBVIEW: &str = "cloud";
 const CHROME_HEIGHT: f64 = 44.0;
@@ -62,6 +66,7 @@ pub fn build_window(app: &tauri::AppHandle, settings: &ProxySettings) -> Result<
         .title(app_locale(app).text("慧梦桌面端", "Huimeng"))
         .inner_size(1440.0, 900.0)
         .min_inner_size(900.0, 600.0)
+        .theme(Some(tauri::Theme::Dark))
         .decorations(false)
         .shadow(true)
         .visible(false)
@@ -242,10 +247,31 @@ pub async fn desktop_window_action(webview: Webview, action: WindowAction) -> Re
                     )
                     .to_string()
             })?;
-            window.popup_menu_at(&menu, LogicalPosition::new(116.0, CHROME_HEIGHT))
+            popup_menu(&window, menu).await
         }
     };
     result.map_err(|error| action_error(&window, error))
+}
+
+async fn popup_menu(window: &Window, menu: tauri::menu::Menu<tauri::Wry>) -> tauri::Result<()> {
+    let (sender, mut receiver) = tauri::async_runtime::channel(1);
+    let popup_window = window.clone();
+    window.run_on_main_thread(move || {
+        // TrackPopupMenu 在主线程同步运行；临时主题须覆盖根菜单及所有二级菜单，
+        // 并在菜单关闭后恢复，不能在派发主线程任务之前就释放 guard。
+        let result = {
+            #[cfg(windows)]
+            let _theme_guard = windows_menu_theme::DarkPopupGuard::new();
+            popup_window.popup_menu_at(&menu, LogicalPosition::new(116.0, CHROME_HEIGHT))
+        };
+        if sender.try_send(result).is_err() {
+            eprintln!("[desktop] 菜单操作结果接收端已关闭");
+        }
+    })?;
+    receiver
+        .recv()
+        .await
+        .ok_or(tauri::Error::FailedToReceiveMessage)?
 }
 
 #[cfg(test)]
