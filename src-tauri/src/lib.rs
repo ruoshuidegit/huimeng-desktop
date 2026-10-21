@@ -218,6 +218,18 @@ fn build_main_window(app: &tauri::AppHandle, settings: &ProxySettings) -> Result
             _ => true,
         })
         .build()
+        .and_then(|window| {
+            #[cfg(target_os = "macos")]
+            window.with_webview(|webview| {
+                use objc2_app_kit::{NSTitlebarSeparatorStyle, NSWindow};
+
+                // Wry 创建 WebView 时会关闭原生分隔线，须在创建完成后恢复。
+                // with_webview 保证此处运行在 AppKit 主线程，窗口句柄在回调期间有效。
+                let ns_window = unsafe { &*webview.ns_window().cast::<NSWindow>() };
+                ns_window.setTitlebarSeparatorStyle(NSTitlebarSeparatorStyle::Line);
+            })?;
+            Ok(window)
+        })
         .map_err(|err| {
             eprintln!("[desktop] 创建主窗口失败：{err}");
             app_locale(app).text(
