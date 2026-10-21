@@ -4,7 +4,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tauri::Manager;
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+use tauri_plugin_dialog::{
+    DialogExt, MessageDialogBuilder, MessageDialogButtons, MessageDialogKind,
+};
 use tauri_plugin_updater::{Error, UpdaterExt};
 
 use crate::locale::DesktopLocale;
@@ -90,12 +92,31 @@ fn failure_message(locale: DesktopLocale, stage: FailureStage, category: &str) -
     }
 }
 
-fn show_message(app: &tauri::AppHandle, title: &str, message: &str, kind: MessageDialogKind) {
-    app.dialog()
-        .message(message)
+fn message_dialog(app: &tauri::AppHandle, message: &str) -> MessageDialogBuilder<tauri::Wry> {
+    let dialog = app.dialog().message(message);
+    // macOS 无父窗口时会走全局用户通知，显式绑定窗口以使用可见的应用内提示。
+    match app
+        .get_webview_window("main")
+        .or_else(|| app.get_webview_window("proxy-settings"))
+    {
+        Some(window) => dialog.parent(&window),
+        None => dialog,
+    }
+}
+
+fn show_message(
+    app: &tauri::AppHandle,
+    locale: DesktopLocale,
+    title: &str,
+    message: &str,
+    kind: MessageDialogKind,
+) {
+    message_dialog(app, message)
         .title(title)
         .kind(kind)
-        .buttons(MessageDialogButtons::Ok)
+        .buttons(MessageDialogButtons::OkCustom(
+            locale.text("确定", "OK").to_string(),
+        ))
         .show(|_| {});
 }
 
@@ -153,6 +174,7 @@ pub async fn check(
         if manual {
             show_message(
                 &app,
+                locale,
                 locale.text("正在更新", "Update in Progress"),
                 locale.text(
                     "正在检查、下载或安装更新，请稍候。",
@@ -181,6 +203,7 @@ pub async fn check(
             if manual {
                 show_message(
                     &app,
+                    locale,
                     locale.text("检查更新失败", "Update Check Failed"),
                     failure_message(locale, FailureStage::Check, "proxy-settings"),
                     MessageDialogKind::Error,
@@ -197,6 +220,7 @@ pub async fn check(
             if manual {
                 show_message(
                     &app,
+                    locale,
                     locale.text("检查更新失败", "Update Check Failed"),
                     failure_message(locale, FailureStage::Check, error_category(&error)),
                     MessageDialogKind::Error,
@@ -213,6 +237,7 @@ pub async fn check(
             if manual {
                 show_message(
                     &app,
+                    locale,
                     locale.text("已是最新版本", "Up to Date"),
                     &format!(
                         "{} v{}",
@@ -229,6 +254,7 @@ pub async fn check(
             if manual {
                 show_message(
                     &app,
+                    locale,
                     locale.text("检查更新失败", "Update Check Failed"),
                     failure_message(locale, FailureStage::Check, error_category(&error)),
                     MessageDialogKind::Error,
@@ -260,8 +286,7 @@ pub async fn check(
     let (sender, mut receiver) = tauri::async_runtime::channel(1);
     let confirmation_app = app.clone();
     let confirmation_version = latest.clone();
-    app.dialog()
-        .message(message)
+    message_dialog(&app, &message)
         .title(locale.text("发现新版本", "Update Available"))
         .kind(MessageDialogKind::Info)
         .buttons(MessageDialogButtons::OkCancelCustom(
@@ -291,6 +316,7 @@ pub async fn check(
             record(&app, "download-failed", Some(&latest), Some(category));
             show_message(
                 &app,
+                locale,
                 locale.text("更新下载失败", "Update Download Failed"),
                 failure_message(locale, FailureStage::Download, category),
                 MessageDialogKind::Error,
@@ -314,6 +340,7 @@ pub async fn check(
             record(&app, "install-failed", Some(&latest), Some(category));
             show_message(
                 &app,
+                locale,
                 locale.text("更新安装失败", "Update Installation Failed"),
                 failure_message(locale, FailureStage::Install, category),
                 MessageDialogKind::Error,
@@ -323,6 +350,7 @@ pub async fn check(
             record(&app, "install-failed", Some(&latest), Some("runtime"));
             show_message(
                 &app,
+                locale,
                 locale.text("更新安装失败", "Update Installation Failed"),
                 failure_message(locale, FailureStage::Install, "runtime"),
                 MessageDialogKind::Error,
