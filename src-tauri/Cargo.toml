@@ -1,6 +1,6 @@
 [package]
 name = "huimeng-desktop"
-version = "0.3.0"
+version = "0.3.1"
 description = "Huimeng desktop shell for the TapxFlow cloud platform"
 authors = ["ruoshui"]
 edition = "2021"
