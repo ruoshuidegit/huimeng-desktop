@@ -1,0 +1,78 @@
+html.desktop-chrome-mode {
+  color: #ededee;
+  background: #141415;
+  color-scheme: dark;
+}
+
+.desktop-chrome-mode body {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.desktop-chrome {
+  display: flex;
+  align-items: center;
+  height: 44px;
+  width: 100%;
+  border-bottom: 1px solid #ffffff0d;
+  background: #141415;
+  color: #ededee;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+.chrome-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 14px;
+  height: 100%;
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.chrome-brand img { width: 23px; height: 23px; object-fit: contain; pointer-events: none; }
+
+.desktop-chrome button {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #a2a2a9;
+  cursor: default;
+  transition: background-color 120ms, color 120ms;
+}
+
+.desktop-chrome button:hover { background: #ffffff0d; color: #fafafa; }
+.desktop-chrome button:active { background: #ffffff14; }
+.desktop-chrome button:focus-visible { outline: 1px solid #a5a5ad; outline-offset: -4px; }
+.desktop-chrome svg { display: block; fill: none; stroke: currentColor; stroke-width: 1; }
+.chrome-menu { width: 30px; height: 28px; flex-shrink: 0; }
+.chrome-menu svg { width: 15px; height: 15px; stroke-width: 1.3; stroke-linecap: round; }
+.chrome-divider { width: 1px; height: 14px; margin: 0 14px; background: #ffffff12; flex-shrink: 0; }
+.chrome-workspace { color: #73737c; font-size: 11px; letter-spacing: 0.04em; white-space: nowrap; }
+.chrome-drag-space { flex: 1; min-width: 24px; height: 100%; }
+.chrome-window-controls { display: flex; height: 100%; flex-shrink: 0; }
+.chrome-window-controls button { width: 46px; height: 100%; border-radius: 0; }
+.chrome-window-controls svg { width: 11px; height: 11px; }
+.chrome-window-controls .chrome-close:hover { background: #c42b38; color: #fff; }
+.chrome-window-controls .chrome-close:active { background: #ad2632; }
+.chrome-feedback { display: flex; align-items: center; gap: 8px; padding-right: 16px; color: #f0b99d; font-size: 11px; white-space: nowrap; }
+.chrome-feedback button { padding: 4px 6px; color: #ededee; font-size: 11px; }
+.is-unfocused .chrome-brand, .is-unfocused .chrome-window-controls { opacity: 0.55; }
+.is-unfocused .chrome-close:hover { opacity: 1; }
+
+@media (max-width: 620px) {
+  .chrome-workspace, .chrome-divider { display: none; }
+  .chrome-feedback > span { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desktop-chrome button { transition: none; }
+}

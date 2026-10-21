@@ -96,8 +96,8 @@ fn message_dialog(app: &tauri::AppHandle, message: &str) -> MessageDialogBuilder
     let dialog = app.dialog().message(message);
     // macOS 无父窗口时会走全局用户通知，显式绑定窗口以使用可见的应用内提示。
     match app
-        .get_webview_window("main")
-        .or_else(|| app.get_webview_window("proxy-settings"))
+        .get_window("main")
+        .or_else(|| app.get_window("proxy-settings"))
     {
         Some(window) => dialog.parent(&window),
         None => dialog,

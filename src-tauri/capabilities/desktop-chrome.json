@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop-chrome",
+  "description": "仅供本地桌面顶栏读取窗口状态和订阅窗口事件",
+  "webviews": ["desktop-chrome"],
+  "permissions": ["core:default"]
+}

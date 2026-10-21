@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+#[cfg(not(target_os = "windows"))]
 use tauri::webview::DownloadEvent;
 use tauri::{Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
@@ -8,6 +9,8 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 const CLOUD_URL: &str = "https://tapxflow.com/?client=desktop";
 const PROXY_SETTINGS_WINDOW: &str = "proxy-settings";
 
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+mod chrome;
 mod locale;
 mod menu;
 mod proxy;
@@ -177,6 +180,12 @@ mod tests {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn build_main_window(app: &tauri::AppHandle, settings: &ProxySettings) -> Result<(), String> {
+    chrome::build_window(app, settings)
+}
+
+#[cfg(not(target_os = "windows"))]
 fn build_main_window(app: &tauri::AppHandle, settings: &ProxySettings) -> Result<(), String> {
     let mut builder = WebviewWindowBuilder::new(
         app,
@@ -267,6 +276,8 @@ pub fn run() {
         .manage(updater::UpdaterState::default())
         .invoke_handler(tauri::generate_handler![
             get_desktop_locale,
+            chrome::get_chrome_state,
+            chrome::desktop_window_action,
             get_proxy_settings,
             save_proxy_settings
         ])
